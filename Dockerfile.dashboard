@@ -1,0 +1,24 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install Node dependencies
+COPY dashboard/package*.json ./dashboard/
+RUN cd dashboard && npm ci
+
+# Copy migrations (used by Postgres init, not by dashboard directly)
+COPY migrations/ migrations/
+
+# Copy dashboard source
+COPY dashboard/ dashboard/
+
+# Build Next.js app
+WORKDIR /app/dashboard
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
