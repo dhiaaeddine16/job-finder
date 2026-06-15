@@ -33,3 +33,5 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+.claude
