@@ -8,7 +8,17 @@ export async function GET(request: Request) {
   const searchMatch = searchParams.get('search_match') || 'partial'; // 'partial' | 'strict'
   const jobType = searchParams.get('job_type') || '';
   const contractorTier = searchParams.get('contractor_tier') || '';
-  const skill = searchParams.get('skill') || '';
+  // Support multiple skills via repeated `skills` params or comma-separated `skills`
+  const rawSkills = searchParams.getAll('skills');
+  // Fallback to single 'skill' param for backward compatibility
+  const singleSkill = searchParams.get('skill') || '';
+  let skills: string[] = [];
+  if (rawSkills.length > 0) {
+    // split comma-separated values
+    skills = rawSkills.flatMap(s => s.split(',').map(x => x.trim()).filter(Boolean));
+  } else if (singleSkill) {
+    skills = [singleSkill];
+  }
   const minBudget = searchParams.get('min_budget') ? parseFloat(searchParams.get('min_budget')!) : null;
   const maxBudget = searchParams.get('max_budget') ? parseFloat(searchParams.get('max_budget')!) : null;
   const duration = searchParams.get('duration') || '';
@@ -67,9 +77,11 @@ export async function GET(request: Request) {
       paramIndex++;
     }
 
-    if (skill) {
-      conditions.push(`$${paramIndex} = ANY(skills)`);
-      values.push(skill);
+    // Support multiple skills: match any selected skill (OR semantics)
+    if (skills.length > 0) {
+      // Use Postgres array overlap operator (&&) so jobs.skills overlaps the provided array (any match)
+      conditions.push(`skills && $${paramIndex}`);
+      values.push(skills);
       paramIndex++;
     }
 

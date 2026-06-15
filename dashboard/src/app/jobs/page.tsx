@@ -41,6 +41,12 @@ export default function JobsPage() {
   const [jobType, setJobType] = useState('');
   const [tier, setTier] = useState('');
   const [skill, setSkill] = useState('');
+  // Multi-select searchable skills
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [skillQuery, setSkillQuery] = useState('');
+  const [skillSuggestions, setSkillSuggestions] = useState<{ name: string; count: number }[]>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [minBudget, setMinBudget] = useState('');
   const [maxBudget, setMaxBudget] = useState('');
   const [duration, setDuration] = useState('');
@@ -53,6 +59,15 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
+  // When selectedSkills change, keep the single-skill `skill` for backward compat UI pieces
+  useEffect(() => {
+    if (selectedSkills.length === 1) {
+      setSkill(selectedSkills[0]);
+    } else {
+      setSkill('');
+    }
+  }, [selectedSkills]);
+
   // Single fetch: jobs + skills (skills only on first load)
   const fetchJobs = useCallback(async () => {
     setLoading(true);
@@ -63,17 +78,24 @@ export default function JobsPage() {
         search_match: searchMatch,
         job_type: jobType,
         contractor_tier: tier,
-        skill,
+        // pass selectedSkills as repeated skills param
         limit: String(PAGE_SIZE),
         offset: String(offset),
         sort_by: sortBy,
       };
+
+      if (selectedSkills.length > 0) {
+        // We'll append skills after creating URLSearchParams
+      }
 
       if (minBudget) queryParams.min_budget = minBudget;
       if (maxBudget) queryParams.max_budget = maxBudget;
       if (duration) queryParams.duration = duration;
 
       const params = new URLSearchParams(queryParams);
+      // append repeated skills values
+      selectedSkills.forEach(s => params.append('skills', s));
+
       const [jr, sr] = await Promise.all([
         fetch(`/api/jobs?${params}`),
         topSkills.length === 0 ? fetch('/api/stats') : Promise.resolve(null),
@@ -86,12 +108,53 @@ export default function JobsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, searchScope, searchMatch, jobType, tier, skill, minBudget, maxBudget, duration, sortBy, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search, searchScope, searchMatch, jobType, tier, selectedSkills, minBudget, maxBudget, duration, sortBy, offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchJobs();
   }, [fetchJobs]);
+
+  // Debounced skill suggestions fetch
+  useEffect(() => {
+    let mounted = true;
+    const handle = setTimeout(async () => {
+      if (!skillQuery) {
+        setSkillSuggestions([]);
+        return;
+      }
+      setSuggestLoading(true);
+      try {
+        const params = new URLSearchParams({ q: skillQuery, limit: '50' });
+        const res = await fetch(`/api/skills?${params}`);
+        const jd = await res.json();
+        if (mounted && !jd.error) {
+          // filter out already selected skills
+          const filtered = (jd.skills ?? []).filter((r: any) => !selectedSkills.includes(r.name));
+          setSkillSuggestions(filtered);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (mounted) setSuggestLoading(false);
+      }
+    }, 250);
+
+    return () => { mounted = false; clearTimeout(handle); };
+  }, [skillQuery, selectedSkills]);
+
+  // Helpers to add/remove skills and trigger fetch
+  const addSkill = (name: string) => {
+    setSelectedSkills(prev => prev.includes(name) ? prev : [...prev, name]);
+    setSkillQuery('');
+    setShowSuggestions(false);
+    setOffset(0);
+  };
+
+  const removeSkill = (name: string) => {
+    setSelectedSkills(prev => prev.filter(s => s !== name));
+    setOffset(0);
+  };
 
   const filter = (type: string, val: string) => {
     setOffset(0);
@@ -105,6 +168,13 @@ export default function JobsPage() {
     if (type === 'max_budget') setMaxBudget(val);
     if (type === 'duration') setDuration(val);
     if (type === 'sort_by') setSortBy(val);
+    if (type === 'toggle_skill') {
+      // toggle and trigger fetch by updating selectedSkills
+      setSelectedSkills(prev => {
+        const next = prev.includes(val) ? prev.filter(s => s !== val) : [...prev, val];
+        return next;
+      });
+    }
   };
 
   const resetFilters = () => {
@@ -115,13 +185,15 @@ export default function JobsPage() {
     setJobType('');
     setTier('');
     setSkill('');
+    setSelectedSkills([]);
+    setSkillQuery('');
     setMinBudget('');
     setMaxBudget('');
     setDuration('');
     setSortBy('newest');
   };
 
-  const hasActiveFilters = !!(search || jobType || tier || skill || minBudget || maxBudget || duration || sortBy !== 'newest' || searchScope !== 'both' || searchMatch !== 'partial');
+  const hasActiveFilters = !!(search || jobType || tier || skill || selectedSkills.length > 0 || minBudget || maxBudget || duration || sortBy !== 'newest' || searchScope !== 'both' || searchMatch !== 'partial');
 
   return (
     <div className="relative z-10 p-8">
@@ -244,20 +316,61 @@ export default function JobsPage() {
         {/* Skill tags + Reset */}
         {(topSkills.length > 0 || hasActiveFilters) && (
           <div className="mt-4 pt-4 border-t border-indigo-950/50 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-indigo-400/50 font-bold uppercase tracking-wider mr-1 shrink-0">Skills:</span>
+
+            {/* Selected skill chips */}
+            {selectedSkills.map(s => (
+              <div key={s} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border bg-indigo-600 border-indigo-500 text-indigo-100">
+                {s}
+                <button onClick={() => removeSkill(s)} className="ml-2 text-xs opacity-80">×</button>
+              </div>
+            ))}
+
+            {/* Searchable input */}
+            <div className="relative ml-2">
+              <input
+                type="text"
+                placeholder="Search skills..."
+                value={skillQuery}
+                onChange={e => { setSkillQuery(e.target.value); setShowSuggestions(true); }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                className="min-w-[200px] bg-indigo-950/40 border border-indigo-900/30 rounded-lg px-3 py-2 text-sm text-indigo-100 placeholder-indigo-300/40 focus:outline-none focus:border-indigo-500"
+              />
+
+              {/* Suggestions dropdown */}
+              {showSuggestions && (
+                <div className="absolute left-0 mt-1 w-[300px] max-h-56 overflow-auto bg-indigo-950/60 border border-indigo-900/50 rounded shadow-lg z-40">
+                  {suggestLoading ? (
+                    <div className="p-2 text-sm text-indigo-300">Loading...</div>
+                  ) : (
+                    skillSuggestions.map(s => (
+                      <div key={s.name} className="px-3 py-2 text-sm hover:bg-indigo-900/40 cursor-pointer flex justify-between items-center"
+                        onMouseDown={() => { addSkill(s.name); setSkillQuery(''); setShowSuggestions(false); }}>
+                        <span>{s.name}</span>
+                        <span className="text-xs opacity-50">{s.count}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Fallback top skills buttons (show first 10 as quick picks) */}
             {topSkills.length > 0 && (
-              <>
-                <span className="text-xs text-indigo-400/50 font-bold uppercase tracking-wider mr-1 shrink-0">Skills:</span>
+              <div className="flex flex-wrap items-center gap-2 ml-2">
                 {topSkills.slice(0, 10).map(s => (
-                  <button key={s.name} onClick={() => filter('skill', s.name)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${skill === s.name
+                  <button key={s.name} onClick={() => filter('toggle_skill', s.name) }
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${selectedSkills.includes(s.name)
                         ? 'bg-indigo-600 border-indigo-500 text-indigo-100'
                         : 'bg-indigo-950/40 border-indigo-900/40 text-indigo-300 hover:border-indigo-700/50 hover:text-indigo-200'
                       }`}>
                     {s.name} <span className="text-[10px] opacity-50">({s.count})</span>
                   </button>
                 ))}
-              </>
+              </div>
             )}
+
             {hasActiveFilters && (
               <button onClick={resetFilters} className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-pink-500/25 bg-pink-500/10 text-xs font-semibold text-pink-400 hover:bg-pink-500/20 hover:text-pink-300 transition">
                 <RotateCcw className="w-3.5 h-3.5" /> Reset Filters
@@ -340,8 +453,8 @@ export default function JobsPage() {
                 {job.skills?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {job.skills.map(s => (
-                      <button key={s} onClick={() => filter('skill', s)}
-                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition ${skill === s
+                      <button key={s} onClick={() => filter('toggle_skill', s)}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border transition ${selectedSkills.includes(s)
                             ? 'bg-indigo-600/20 border-indigo-400/70 text-indigo-200'
                             : 'bg-indigo-950/30 border-indigo-900/30 text-indigo-300/60 hover:border-indigo-700/40 hover:text-indigo-200'
                           }`}>

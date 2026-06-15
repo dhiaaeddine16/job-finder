@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(docker compose -f docker-compose.yml build dashboard)",
+      "PowerShell(docker compose -f docker-compose.yml up -d --no-deps --force-recreate dashboard)",
+      "PowerShell(docker exec -i upworkdashbord-db-1 psql -U upwork -d upwork -c \"CREATE INDEX IF NOT EXISTS idx_jobs_skills_gin ON jobs USING GIN \\(skills\\);\")"
+    ]
+  }
+}
