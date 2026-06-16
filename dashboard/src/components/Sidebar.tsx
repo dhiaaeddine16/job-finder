@@ -25,6 +25,7 @@ const NAV = [
   { href: '/',        icon: LayoutDashboard, label: 'Dashboard', sub: 'Overview & stats' },
   { href: '/jobs',    icon: Briefcase,        label: 'Jobs',      sub: 'Browse listings'  },
   { href: '/scraper', icon: Terminal,         label: 'Scraper',   sub: 'Engine & console' },
+  { href: '/profiles', icon: Zap,              label: 'Profiles',  sub: 'Manage Upwork profiles' },
 ];
 
 export default function Sidebar() {
