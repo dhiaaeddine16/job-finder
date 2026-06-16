@@ -1,5 +1,6 @@
 # Dependencies
 dashboard/node_modules/
+labs/node_modules/
 
 # Next.js build output
 dashboard/.next/
